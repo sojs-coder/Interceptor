@@ -3,8 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const url = require('url');
 const mime = require('mime-types');
-
 async function interceptRequests(targetUrl, outputFolder, localOnly) {
+    console.log("STARTING....")
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
     let requestCount = 0;
