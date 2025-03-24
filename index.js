@@ -3,9 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const url = require('url');
 const mime = require('mime-types');
-async function interceptRequests(targetUrl, outputFolder, localOnly) {
+async function interceptRequests(targetUrl, outputFolder, localOnly, allowedHosts) {
     console.log("STARTING....")
-    const browser = await puppeteer.launch();
+    const browser = await puppeteer.launch({
+        headless: false
+    });
     const page = await browser.newPage();
     let requestCount = 0;
     const savedFiles = [];
@@ -19,11 +21,21 @@ async function interceptRequests(targetUrl, outputFolder, localOnly) {
         const requestUrl = request.url();
         const parsedUrl = new URL(requestUrl);
         const targetHostname = new URL(targetUrl).hostname;
+        if (requestUrl.includes("sitelock.js")) {
+            console.log(`[${rqNum}]: ${requestUrl} -> Refusing (sitelock)`);
+            // return false empty js script
+            await request.respond({
+                status: 200,
+                contentType: 'application/javascript',
+                body: 'console.log("sitelock.js blocked");'
 
-        if (localOnly && parsedUrl.hostname !== targetHostname) {
-            console.log(`[${requestCount}]: ${requestUrl} -> Skipping (localOnly flag)`);
-            await request.continue();
-            return;
+            });
+        } else {
+            if (localOnly && parsedUrl.hostname !== targetHostname && (!allowedHosts || !allowedHosts.includes(parsedUrl.hostname))) {
+                console.log(`[${requestCount}]: ${requestUrl} -> Skipping (localOnly flag)`);
+                await request.continue();
+                return;
+            }
         }
 
         try {
@@ -83,12 +95,12 @@ async function interceptRequests(targetUrl, outputFolder, localOnly) {
         console.error(`Error navigating to ${targetUrl}: ${error.message}`);
     }
 
-    await browser.close();
+    // await browser.close();
 
     console.log(`Intercept complete, ${savedFiles.length} files saved from <${targetUrl}> to ${outputFolder}`);
 }
 
-const [, , targetUrl, outputFolder, localOnlyFlag] = process.argv;
+const [, , targetUrl, outputFolder, localOnlyFlag, allowedHosts] = process.argv;
 const localOnly = localOnlyFlag === '--localOnly';
 
 if (!targetUrl || !outputFolder) {
@@ -98,4 +110,4 @@ if (!targetUrl || !outputFolder) {
 // targets go to `output` folder
 var rOutputFolder = path.join(__dirname, 'output');
 
-interceptRequests(targetUrl, rOutputFolder, localOnly);
+interceptRequests(targetUrl, rOutputFolder, localOnly, allowedHosts);
