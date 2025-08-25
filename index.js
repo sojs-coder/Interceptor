@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const url = require('url');
 const mime = require('mime-types');
-async function interceptRequests(targetUrl, outputFolder, localOnly, allowedHosts) {
+async function interceptRequests(targetUrl, outputFolder, localOnly, allowedHosts, rewrites) {
     console.log("STARTING....")
     const browser = await puppeteer.launch({
         headless: false
@@ -48,11 +48,11 @@ async function interceptRequests(targetUrl, outputFolder, localOnly, allowedHost
             // Convert the response to a buffer
 
             var arrayBuffer = await manualResponse.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
+            let buffer = Buffer.from(arrayBuffer);
             const headers = new Headers(manualResponse.headers);
             const contentType = headers.get('content-type') || 'application/octet-stream';
 
-            let filePath = path.join(outputFolder, parsedUrl.pathname);
+            let filePath = path.join(outputFolder, decodeURIComponent(parsedUrl.pathname));
 
             // Remove query parameters and hash from the file path
             filePath = filePath.split('?')[0].split('#')[0];
@@ -78,6 +78,20 @@ async function interceptRequests(targetUrl, outputFolder, localOnly, allowedHost
                 filePath = `${filePath || 'index'}.${fileExtension || 'bin'}`;
             }
             await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+            if(rewrites && rewrites.length > 0 && contentType.startsWith('text/')) {
+                let text = buffer.toString();
+                for (const rewrite of rewrites) {
+                    // Change the origin of the URL in the buffer to the local origin (relative path)
+                    text = text.replaceAll(new URL(rewrite).origin + '/', '');
+                }
+                buffer = Buffer.from(text);
+            }
+            if(contentType.startsWith('text/')) {
+                // normalize all URLs to be encoded
+                buffer = Buffer.from(buffer.toString().replace(/(src|href|url)=["']([^"']+)["']/g, (match, p1, p2) => {
+                    return `${p1}="${encodeURI(p2)}"`;
+                }));
+            }
             await fs.promises.writeFile(filePath, buffer);
             console.log(`[${rqNum}]: ${requestUrl} -> ${filePath} (${contentType})`);
             savedFiles.push(filePath);
@@ -90,7 +104,7 @@ async function interceptRequests(targetUrl, outputFolder, localOnly, allowedHost
     console.log('Requests...');
 
     try {
-        await page.goto(targetUrl, { waitUntil: 'networkidle0', timeout: 60000 });
+        await page.goto(targetUrl, { waitUntil: 'networkidle0', timeout: 0 });
     } catch (error) {
         console.error(`Error navigating to ${targetUrl}: ${error.message}`);
     }
@@ -99,7 +113,11 @@ async function interceptRequests(targetUrl, outputFolder, localOnly, allowedHost
 
     console.log(`Intercept complete, ${savedFiles.length} files saved from <${targetUrl}> to ${outputFolder}`);
 }
+module.exports = {interceptRequests};
 
+if(require.main !== module) {
+    return;
+}
 const [, , targetUrl, outputFolder, localOnlyFlag, allowedHosts] = process.argv;
 const localOnly = localOnlyFlag === '--localOnly';
 
